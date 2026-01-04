@@ -1,1 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTML5 3D RPG</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+body { margin:0; overflow:hidden; background:#000; font-family:Arial }
+#ui {
+ position:fixed; top:10px; left:10px;
+ color:white; background:rgba(0,0,0,.5);
+ padding:10px; border-radius:8px; z-index:10
+}
+#joystick {
+ position:fixed; bottom:40px; left:40px;
+ width:120px; height:120px; border-radius:50%;
+ background:rgba(255,255,255,.15); touch-action:none
+}
+#stick {
+ position:absolute; left:40px; top:40px;
+ width:40px; height:40px; border-radius:50%;
+ background:rgba(255,255,255,.6)
+}
+.btn {
+ position:fixed; bottom:40px;
+ width:70px; height:70px; border-radius:50%;
+ display:flex; align-items:center; justify-content:center;
+ font-weight:bold; color:white; user-select:none
+}
+#atk { right:140px; background:#b00000 }
+#mag { right:40px; background:#003cff }
+</style>
+</head>
+<body>
 
+<div id="ui"></div>
+<div id="joystick"><div id="stick"></div></div>
+<div class="btn" id="atk">ATK</div>
+<div class="btn" id="mag">MAG</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.155/build/three.min.js"></script>
+
+<script>
+// ================= SCENE =================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x77aa77);
+scene.fog = new THREE.Fog(0x77aa77, 15, 80);
+
+const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, 0.1, 500);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// ================= LIGHT =================
+scene.add(new THREE.AmbientLight(0xffffff, .6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(10,30,10);
+sun.castShadow = true;
+scene.add(sun);
+
+// ================= GROUND =================
+const ground = new THREE.Mesh(
+ new THREE.PlaneGeometry(500,500),
+ new THREE.MeshStandardMaterial({ color:0x335522 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ================= PLAYER =================
+const player = new THREE.Mesh(
+ new THREE.CapsuleGeometry(.4,1.2,4,8),
+ new THREE.MeshStandardMaterial({ color:0xddddff })
+);
+player.position.y = 1;
+player.castShadow = true;
+scene.add(player);
+
+// ================= ENEMIES =================
+const enemies = [];
+function spawnEnemy(x,z,isBoss=false){
+ const e = new THREE.Mesh(
+  new THREE.BoxGeometry(isBoss?2:1,isBoss?2:1,isBoss?2:1),
+  new THREE.MeshStandardMaterial({ color:isBoss?0xaa0000:0x222222 })
+ );
+ e.position.set(x,0.5,z);
+ e.hp = isBoss ? 300 : 80;
+ e.isBoss = isBoss;
+ e.castShadow = true;
+ scene.add(e);
+ enemies.push(e);
+ if(isBoss) bossIntro(e);
+}
+
+spawnEnemy(5,5);
+spawnEnemy(-6,6);
+spawnEnemy(0,15,true);
+
+// ================= BOSS CUTSCENE =================
+let cutscene = 0, bossTarget = null;
+function bossIntro(b){
+ cutscene = 120;
+ bossTarget = b;
+}
+
+// ================= CAMERA INPUT =================
+let yaw = 0, dragging = false, lastX = 0;
+addEventListener("touchstart", e=>{
+ dragging = true; lastX = e.touches[0].clientX;
+},{passive:false});
+addEventListener("touchend", ()=>dragging=false);
+addEventListener("touchmove", e=>{
+ if(!dragging) return;
+ yaw -= (e.touches[0].clientX-lastX)*0.005;
+ lastX = e.touches[0].clientX;
+ e.preventDefault();
+},{passive:false});
+
+// ================= JOYSTICK =================
+const joy = document.getElementById("joystick");
+const stick = document.getElementById("stick");
+let joyVec = {x:0,y:0};
+
+joy.addEventListener("touchmove", e=>{
+ const r = joy.getBoundingClientRect();
+ const x = e.touches[0].clientX - r.left - 60;
+ const y = e.touches[0].clientY - r.top - 60;
+ const d = Math.min(40, Math.hypot(x,y));
+ const a = Math.atan2(y,x);
+ joyVec.x = Math.cos(a)*d/40;
+ joyVec.y = Math.sin(a)*d/40;
+ stick.style.left = 40 + joyVec.x*40 + "px";
+ stick.style.top  = 40 + joyVec.y*40 + "px";
+ e.preventDefault();
+},{passive:false});
+
+joy.addEventListener("touchend", ()=>{
+ joyVec = {x:0,y:0};
+ stick.style.left="40px";
+ stick.style.top="40px";
+});
+
+// ================= COMBAT =================
+let hp = 100, mana = 100;
+document.getElementById("atk").onclick = ()=>{
+ enemies.forEach(e=>{
+  if(e.position.distanceTo(player.position) < 2){
+   e.hp -= 30;
+  }
+ });
+};
+document.getElementById("mag").onclick = ()=>{
+ if(mana < 20) return;
+ mana -= 20;
+};
+
+// ================= LOOP =================
+function animate(){
+ requestAnimationFrame(animate);
+
+ const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+ const right   = new THREE.Vector3(-forward.z,0,forward.x);
+ player.position.add(forward.multiplyScalar(joyVec.y*0.12));
+ player.position.add(right.multiplyScalar(joyVec.x*0.12));
+ player.rotation.y = yaw;
+
+ enemies.forEach((e,i)=>{
+  if(e.hp <= 0){
+   scene.remove(e);
+   enemies.splice(i,1);
+   return;
+  }
+  if(e.position.distanceTo(player.position) < 10){
+   e.position.lerp(player.position, 0.01);
+  }
+ });
+
+ // Camera
+ if(cutscene>0 && bossTarget){
+  cutscene--;
+  camera.position.lerp(
+   new THREE.Vector3(
+    bossTarget.position.x+6,
+    6,
+    bossTarget.position.z+6
+   ), .05
+  );
+  camera.lookAt(bossTarget.position);
+ } else {
+  camera.position.set(
+   player.position.x + Math.sin(yaw)*7,
+   player.position.y + 4,
+   player.position.z + Math.cos(yaw)*7
+  );
+  camera.lookAt(player.position.x,2,player.position.z);
+ }
+
+ document.getElementById("ui").innerText =
+  `HP: ${hp}  Mana: ${mana}  Enemies: ${enemies.length}`;
+
+ renderer.render(scene,camera);
+}
+animate();
+
+addEventListener("resize", ()=>{
+ camera.aspect = innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
